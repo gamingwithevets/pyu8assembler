@@ -8,7 +8,24 @@ logging.basicConfig(datefmt = '%d/%m/%Y %H:%M:%S', format = '[%(asctime)s] %(lev
 class Assembler:
 	def __init__(self):
 		self.instruction_list = (
-		(('MOV', 'GR', 'num_imm8'), 0),
+		(('ADD',  'GR', 'GR'),       0x8001),
+		(('ADD',  'GR', 'num_imm8'), 0x1000),
+		(('ADDC', 'GR', 'GR'),       0x8006),
+		(('ADDC', 'GR', 'num_imm8'), 0x6000),
+		(('AND',  'GR', 'GR'),       0x8002),
+		(('AND',  'GR', 'num_imm8'), 0x2000),
+		(('CMP',  'GR', 'GR'),       0x8007),
+		(('CMP',  'GR', 'num_imm8'), 0x7000),
+		(('CMPC', 'GR', 'GR'),       0x8005),
+		(('CMPC', 'GR', 'num_imm8'), 0x5000),
+		(('MOV',  'GR', 'GR'),       0x8000),
+		(('MOV',  'GR', 'num_imm8'), 0x0000),
+		(('OR',   'GR', 'GR'),       0x8003),
+		(('OR',   'GR', 'num_imm8'), 0x3000),
+		(('SUB',  'GR', 'GR'),       0x8008),
+		(('SUBC', 'GR', 'GR'),       0x8009),
+		(('XOR',  'GR', 'GR'),       0x8004),
+		(('XOR',  'GR', 'num_imm8'), 0x4000),
 		)
 
 		self.assembly = None
@@ -57,10 +74,16 @@ class Assembler:
 				if line[0] != ins[0][0]: continue
 				score = 0
 				for i in (1, 2):
-					if ins[0][i].startswith('G') and line[i].startswith(ins[0][i][2:]): score += 1
-				if score < 1: continue
+					if ins[0][i].startswith('G') and line[i].startswith(ins[0][i][1:]): score += 1
+					elif ins[0][i].startswith('num_'):
+						numtype = self.numtypes[ins[0][i]]
+						if numtype[0]:
+							if line[i][0] == '#': score += 1
+							else: self.stop_lineno('Expected immediate (did you forget to add "#"?)')
+				if score != 2: continue
 
 				instruction = ins
+				break
 
 			if instruction == None: self.stop_lineno(f'Line {idx+1}: Cannot detect instruction, check that your syntax is correct\n(Instruction may not be implemented yet)')
 
@@ -72,12 +95,13 @@ class Assembler:
 				if ins[i].startswith('G'):
 					if ins[i][1] == 'R':
 						if line[i][1:].isnumeric() and int(line[i][1:]) < 16: opcode |= int(line[i][1:]) << (8 if i == 1 else 4)
-						else: self.stop_lineno('Invalid Rn value')
+						else: self.stop_lineno(f'Invalid Rn value')
 				elif ins[i].startswith('num_'):
 					numtype = self.numtypes[ins[i]]
 					if numtype[0]:
-						if line[i][0] == '#': opcode += self.conv_num(line[i][1:])
+						if line[i][0] == '#': opcode += self.conv_num(line[i][1:]) & numtype[1]
 						else: self.stop_lineno('Expected immediate (did you forget to add "#"?)')
+					else: opcode += self.conv_num(line[i][1:]) & numtype[1]
 
 			byte_data = opcode.to_bytes(ins_len, 'little')
 			for i in range(ins_len): opcodes[adr+i] = byte_data[i]
