@@ -8,24 +8,51 @@ logging.basicConfig(datefmt = '%d/%m/%Y %H:%M:%S', format = '[%(asctime)s] %(lev
 class Assembler:
 	def __init__(self):
 		self.instruction_list = (
-		(('ADD',  'GR', 'GR'),       0x8001),
-		(('ADD',  'GR', 'num_imm8'), 0x1000),
-		(('ADDC', 'GR', 'GR'),       0x8006),
-		(('ADDC', 'GR', 'num_imm8'), 0x6000),
-		(('AND',  'GR', 'GR'),       0x8002),
-		(('AND',  'GR', 'num_imm8'), 0x2000),
-		(('CMP',  'GR', 'GR'),       0x8007),
-		(('CMP',  'GR', 'num_imm8'), 0x7000),
-		(('CMPC', 'GR', 'GR'),       0x8005),
-		(('CMPC', 'GR', 'num_imm8'), 0x5000),
-		(('MOV',  'GR', 'GR'),       0x8000),
-		(('MOV',  'GR', 'num_imm8'), 0x0000),
-		(('OR',   'GR', 'GR'),       0x8003),
-		(('OR',   'GR', 'num_imm8'), 0x3000),
-		(('SUB',  'GR', 'GR'),       0x8008),
-		(('SUBC', 'GR', 'GR'),       0x8009),
-		(('XOR',  'GR', 'GR'),       0x8004),
-		(('XOR',  'GR', 'num_imm8'), 0x4000),
+		(('ADD',  'GR',  'GR'),       0x8001),
+		(('ADD',  'GR',  'num_imm8'), 0x1000),
+		(('ADDC', 'GR',  'GR'),       0x8006),
+		(('ADDC', 'GR',  'num_imm8'), 0x6000),
+		(('AND',  'GR',  'GR'),       0x8002),
+		(('AND',  'GR',  'num_imm8'), 0x2000),
+		(('BRK',),                    0xffff),
+		(('CMP',  'GR',  'GR'),       0x8007),
+		(('CMP',  'GR',  'GR'),       0x8007),
+		(('CMPC', 'GR',  'GR'),       0x8005),
+		(('CMPC', 'GR',  'num_imm8'), 0x5000),
+		(('CPLC',),                   0xfecf),
+		(('DAA',  'GR'),              0x801f),
+		(('DAS',  'GR'),              0x803f),
+		(('DEC',  '[EA]'),            0xfe3f),
+		(('DI',),                     0xebf7),
+		(('EI',),                     0xed08),
+		(('INC',  '[EA]'),            0xfe2f),
+		(('L',    'GR',  '[EA]'),     0x9030),
+		(('L',    'GR',  '[EA+]'),    0x9050),
+		(('MOV',  'GR',  'EPSW'),     0xa004),
+		(('MOV',  'GR',  'PSW'),      0xa003),
+		(('MOV',  'GR',  'GR'),       0x8000),
+		(('MOV',  'GR',  'num_imm8'), 0x0000),
+		(('NEG',  'GR'),              0x805f),
+		(('NOP',),                    0xfe8f),
+		(('OR',   'GR',  'GR'),       0x8003),
+		(('OR',   'GR',  'num_imm8'), 0x3000),
+		(('POP',  'GR'),              0xf00e),
+		(('PUSH', 'GR'),              0xf04e),
+		(('RC',),                     0xeb7f),
+		(('RT',),                     0xfe1f),
+		(('RTI',),                    0xfe0f),
+		(('SC',),                     0xeb80),
+		(('SLL',  'GR', 'GR'),        0x800a),
+		(('SLLC', 'GR', 'GR'),        0x800b),
+		(('SRA',  'GR', 'GR'),        0x800e),
+		(('SRL',  'GR', 'GR'),        0x800c),
+		(('SRLC', 'GR', 'GR'),        0x800d),
+		(('ST',   'GR',  '[EA]'),     0x9031),
+		(('ST',   'GR',  '[EA+]'),    0x9051),
+		(('SUB',  'GR',  'GR'),       0x8008),
+		(('SUBC', 'GR',  'GR'),       0x8009),
+		(('XOR',  'GR',  'GR'),       0x8004),
+		(('XOR',  'GR',  'num_imm8'), 0x4000),
 		)
 
 		self.assembly = None
@@ -71,15 +98,17 @@ class Assembler:
 			elif len(line) == 3: line[1] = line[1][:-1]
 			instruction = None
 			for ins in self.instruction_list:
+				if len(line) != len(ins[0]): continue
 				if line[0] != ins[0][0]: continue
 				score = 0
-				for i in (1, 2):
+				for i in range(1, len(line)):
 					if ins[0][i].startswith('G') and line[i].startswith(ins[0][i][1:]): score += 1
 					elif ins[0][i].startswith('num_'):
 						numtype = self.numtypes[ins[0][i]]
 						if numtype[0]:
 							if line[i][0] == '#': score += 1
 							else: self.stop_lineno('Expected immediate (did you forget to add "#"?)')
+					elif ins[0][i] == line[i] == '[EA]': score += 1
 				if score != 2: continue
 
 				instruction = ins
