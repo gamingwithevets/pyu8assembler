@@ -127,7 +127,7 @@ class Assembler:
 				logging.debug(f'line {self.idx+1}: instruction matches format of {ins[0]}')
 				break
 
-			if instruction == None: self.stop_lineno('Cannot detect instruction, check that your syntax is correct\n(Instruction may not be implemented yet)')
+			if instruction == None: self.stop_lineno('Unknown instruction/directive\n(Instruction/directive may not be implemented yet)')
 
 			ins = instruction[0]
 			opcode = instruction[1]
