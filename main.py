@@ -101,6 +101,9 @@ class Assembler:
 			if self.assembly[idx] == '' or re.fullmatch(r'\s+', self.assembly[idx]): continue
 			self.idx = idx
 			line = list(filter(('').__ne__, re.split('[ \t]', self.assembly[idx].upper())))
+
+			if line[0] == 'END': break
+
 			if len(line) > 3: self.stop_lineno("Instruction has more than 3 operands\n(note: are you trying to add a label? labels aren't implemented yet.)")
 			elif len(line) == 3: line[1] = line[1][:-1]
 			instruction = None
