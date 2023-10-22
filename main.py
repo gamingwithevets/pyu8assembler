@@ -3,8 +3,6 @@ import sys
 import logging
 import argparse
 
-logging.basicConfig(datefmt = '%d/%m/%Y %H:%M:%S', format = '[%(asctime)s] %(levelname)s: %(message)s')
-
 class Assembler:
 	def __init__(self):
 		self.instruction_list = (
@@ -81,9 +79,14 @@ class Assembler:
 
 	def conv_num(self, num_str):
 		base = 10
-		if not num_str[-1].isnumeric() and num_str[-1] in self.bases.keys(): base = self.bases[num_str[-1]]
-		try: num = int(num_str[:-1], base)
-		except ValueError: self.stop_lineno('Invalid number')
+		if num_str[-1].isnumeric():
+			try: num = int(num_str, base)
+			except ValueError: self.stop_lineno('Invalid number')
+		else:
+			if num_str[-1] in self.bases.keys(): base = self.bases[num_str[-1]]
+			else: self.stop_lineno('Invalid radix specifier')
+			try: num = int(num_str[:-1], base)
+			except ValueError: self.stop_lineno('Invalid number')
 
 		return num
 
@@ -101,17 +104,19 @@ class Assembler:
 				if len(line) != len(ins[0]): continue
 				if line[0] != ins[0][0]: continue
 				score = 0
-				for i in range(1, len(line)):
-					if ins[0][i].startswith('G') and line[i].startswith(ins[0][i][1:]): score += 1
-					elif ins[0][i].startswith('num_'):
-						numtype = self.numtypes[ins[0][i]]
-						if numtype[0]:
-							if line[i][0] == '#': score += 1
-							else: self.stop_lineno('Expected immediate (did you forget to add "#"?)')
-					elif ins[0][i] == line[i] == '[EA]': score += 1
-				if score != 2: continue
+				if len(line) > 1:
+					for i in range(1, len(line)):
+						if ins[0][i].startswith('G') and line[i].startswith(ins[0][i][1:]): score += 1
+						elif ins[0][i].startswith('num_'):
+							numtype = self.numtypes[ins[0][i]]
+							if numtype[0]:
+								if line[i][0] == '#': score += 1
+								else: self.stop_lineno('Expected immediate (did you forget to add "#"?)')
+						elif ins[0][i] == line[i] == '[EA]': score += 1
+					if score != len(line) - 1: continue
 
 				instruction = ins
+				logging.debug(f'line {self.idx+1}: instruction matches format of {ins[0]}')
 				break
 
 			if instruction == None: self.stop_lineno('Cannot detect instruction, check that your syntax is correct\n(Instruction may not be implemented yet)')
@@ -128,10 +133,13 @@ class Assembler:
 				elif ins[i].startswith('num_'):
 					numtype = self.numtypes[ins[i]]
 					if numtype[0]:
+						logging.debug(f'line {self.idx+1}: converted number {line[i][1:]} to {self.conv_num(line[i][1:])}')
 						if line[i][0] == '#': opcode += self.conv_num(line[i][1:]) & numtype[1]
 						else: self.stop_lineno('Expected immediate (did you forget to add "#"?)')
 					else: opcode += self.conv_num(line[i][1:]) & numtype[1]
 
+			logging.debug(f'line {self.idx+1}: converted to word {opcode:04X}')
+			
 			byte_data = opcode.to_bytes(ins_len, 'little')
 			for i in range(ins_len): opcodes[adr+i] = byte_data[i]
 			adr += ins_len
@@ -145,7 +153,10 @@ if __name__ == '__main__':
 	parser = argparse.ArgumentParser(description = 'nX-U8/100 assembler.', epilog = '(c) 2023 GamingWithEvets Inc.\nLicensed under the GNU GPL-v3 license', formatter_class=argparse.RawTextHelpFormatter, allow_abbrev = False)
 	parser.add_argument('input', type = open, help = 'name of assembly file')
 	parser.add_argument('-o', '--output', metavar = 'output', default = 'out.bin', help = 'name of output file. default: out.bin')
+	parser.add_argument('-d', '--debug', action = 'store_true', help = 'enable debug logs')
 	args = parser.parse_args()
+
+	logging.basicConfig(datefmt = '%d/%m/%Y %H:%M:%S', format = '[%(asctime)s] %(levelname)s: %(message)s', level = logging.DEBUG if args.debug else logging.INFO)
 
 	assembler = Assembler()
 	assembler.assembly = args.input.read().split('\n')
