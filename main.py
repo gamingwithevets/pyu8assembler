@@ -114,7 +114,7 @@ class Assembler:
 				instruction = ins
 				break
 
-			if instruction == None: self.stop_lineno(f'Line {idx+1}: Cannot detect instruction, check that your syntax is correct\n(Instruction may not be implemented yet)')
+			if instruction == None: self.stop_lineno('Cannot detect instruction, check that your syntax is correct\n(Instruction may not be implemented yet)')
 
 			ins = instruction[0]
 			opcode = instruction[1]
