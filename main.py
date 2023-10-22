@@ -6,7 +6,8 @@ import argparse
 class Assembler:
 	def __init__(self):
 		self.instruction_list = (
-		(('DW',   'num_word'))
+		(('DB',   'num_byte'),        0x0000),
+		(('DW',   'num_word'),        0x0000),
 		(('ADD',  'GR',  'GR'),       0x8001),
 		(('ADD',  'GR',  'num_imm8'), 0x1000),
 		(('ADDC', 'GR',  'GR'),       0x8006),
@@ -61,6 +62,7 @@ class Assembler:
 		self.numtypes = {
 			# type: (immediate, andval)
 			'num_imm8': (True,  0xff),
+			'num_byte': (False, 0xff),
 			'num_word': (False, 0xffff),
 		}
 
@@ -135,11 +137,14 @@ class Assembler:
 						else: self.stop_lineno(f'Invalid Rn value')
 				elif ins[i].startswith('num_'):
 					numtype = self.numtypes[ins[i]]
-					logging.debug(f'line {self.idx+1}: converted number {line[i][1:]} to {self.conv_num(line[i][1:])}')
 					if numtype[0]:
-						if line[i][0] == '#': opcode += self.conv_num(line[i][1:]) & numtype[1]
+						if line[i][0] == '#':
+							logging.debug(f'line {self.idx+1}: converted number {line[i][1:]} to {self.conv_num(line[i][1:])}')
+							opcode += self.conv_num(line[i][1:]) & numtype[1]
 						else: self.stop_lineno('Expected immediate (did you forget to add "#"?)')
-					else: opcode += self.conv_num(line[i][1:]) & numtype[1]
+					else:
+						logging.debug(f'line {self.idx+1}: converted number {line[i]} to {self.conv_num(line[i])}')
+						opcode += self.conv_num(line[i]) & numtype[1]
 
 			logging.debug(f'line {self.idx+1}: converted to word {opcode:04X}')
 
