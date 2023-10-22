@@ -128,6 +128,8 @@ class Assembler:
 
 			ins = instruction[0]
 			opcode = instruction[1]
+			opcode2 = None
+			opcode_dsr = None
 			ins_len = 2
 
 			for i in range(1, len(ins)):
@@ -148,7 +150,11 @@ class Assembler:
 
 			logging.debug(f'line {self.idx+1}: converted to word {opcode:04X}')
 
-			byte_data = opcode.to_bytes(ins_len, 'little')
+			byte_data = opcode.to_bytes(2, 'little')
+			byte_data2 = opcode2.to_bytes(2, 'little') if opcode2 is not None else b''
+			byte_data_dsr = opcode_dsr.to_bytes(2, 'little') if opcode_dsr is not None else b''
+			byte_data = byte_data_dsr + byte_data + byte_data2
+
 			for i in range(ins_len): opcodes[adr+i] = byte_data[i]
 			adr += ins_len
 
