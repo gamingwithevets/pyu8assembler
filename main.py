@@ -6,7 +6,6 @@ import argparse
 class Assembler:
 	def __init__(self):
 		self.instruction_list = (
-		(('DB',   'num_byte'),        0x0000),
 		(('DW',   'num_word'),        0x0000),
 		(('ADD',  'GR',  'GR'),       0x8001),
 		(('ADD',  'GR',  'num_imm8'), 0x1000),
@@ -22,12 +21,12 @@ class Assembler:
 		(('CPLC',),                   0xfecf),
 		(('DAA',  'GR'),              0x801f),
 		(('DAS',  'GR'),              0x803f),
-		(('DEC',  '[EA]'),            0xfe3f),
+		(('DEC',  'P:[EA]'),          0xfe3f),
 		(('DI',),                     0xebf7),
 		(('EI',),                     0xed08),
-		(('INC',  '[EA]'),            0xfe2f),
-		(('L',    'GR',  '[EA]'),     0x9030),
-		(('L',    'GR',  '[EA+]'),    0x9050),
+		(('INC',  'P:[EA]'),          0xfe2f),
+		(('L',    'GR',  'P:[EA]'),   0x9030),
+		(('L',    'GR',  'P:[EA+]'),  0x9050),
 		(('MOV',  'GR',  'EPSW'),     0xa004),
 		(('MOV',  'GR',  'PSW'),      0xa003),
 		(('MOV',  'GR',  'GR'),       0x8000),
@@ -76,6 +75,8 @@ class Assembler:
 
 	def stop_lineno(self, err_str): self.stop(f'line {self.idx+1}: {err_str}')
 
+	def debug_lineno(self, debug_str): logging.debug(f'line {self.idx+1}: {debug_str}')
+
 	@staticmethod
 	def stop(err_str):
 		logging.error(err_str)
@@ -94,6 +95,27 @@ class Assembler:
 
 		return num
 
+	def is_number(self, num_str):
+		base = 10
+		if num_str[-1].isnumeric():
+			try: int(num_str, base)
+			except ValueError: return False
+		else:
+			if num_str[-1] in self.bases.keys(): base = self.bases[num_str[-1]]
+			else: return False
+			try: int(num_str[:-1], base)
+			except ValueError: return False
+
+		return True
+
+	def assemble_prefix(self, prefix):
+		if prefix == 'DSR': return 0xfe9f
+		elif prefix[0] == 'R':
+			if prefix[1:].isnumeric() and int(prefix[1:]) < 16: return 0x900f | int(prefix[1:]) << 4
+			else: self.stop_lineno(f'Invalid Rn value')
+		elif self.is_number(prefix): return 0xe300 + self.conv_num(prefix)
+		else: self.stop_lineno('Invalid DSR prefix')
+
 	def assemble(self, output):
 		adr = 0
 		opcodes = {}
@@ -104,9 +126,10 @@ class Assembler:
 
 			if line[0] == 'END': break
 
-			if len(line) > 3: self.stop_lineno("Instruction has more than 3 operands\n(note: are you trying to add a label? labels aren't implemented yet.)")
-			elif len(line) == 3: line[1] = line[1][:-1]
+			for i in range(1, len(line) - 1): line[i] = line[i][:-1]
+			if len(line) > 3 and line[0] not in ('PUSH', 'POP'): self.stop_lineno("Non-PUSH/POP instruction has more than 3 operands")
 			instruction = None
+			opcode_dsr = None
 			for ins in self.instruction_list:
 				if len(line) != len(ins[0]): continue
 				if line[0] != ins[0][0]: continue
@@ -120,11 +143,19 @@ class Assembler:
 								if line[i][0] == '#': score += 1
 								else: self.stop_lineno('Expected immediate (did you forget to add "#"?)')
 							else: score += 1
-						elif ins[0][i] == line[i] == '[EA]': score += 1
+						elif ins[0][i].startswith('P:'):
+							splitted = line[i].split(':')
+							comp_str = splitted[0]
+							if len(line[i]) > 1:
+								if len(line[i]) != 2: self.stop_lineno('Too many colons')
+								comp_str = splitted[1]
+								opcode_dsr = self.assemble_prefix(splitted[0])
+								self.debug_lineno(f"Converted DSR prefix '{splitted[0]}' to word {opcode_dsr:04X}")
+							if comp_str == ins[0][i][2:]: score += 1
 					if score != len(line) - 1: continue
 
 				instruction = ins
-				logging.debug(f'line {self.idx+1}: instruction matches format of {ins[0]}')
+				self.debug_lineno(f'instruction matches format of {ins[0]}')
 				break
 
 			if instruction == None: self.stop_lineno('Unknown instruction/directive\n(Instruction/directive may not be implemented yet)')
@@ -132,7 +163,6 @@ class Assembler:
 			ins = instruction[0]
 			opcode = instruction[1]
 			opcode2 = None
-			opcode_dsr = None
 			ins_len = 2
 
 			for i in range(1, len(ins)):
@@ -144,14 +174,14 @@ class Assembler:
 					numtype = self.numtypes[ins[i]]
 					if numtype[0]:
 						if line[i][0] == '#':
-							logging.debug(f'line {self.idx+1}: converted number {line[i][1:]} to {self.conv_num(line[i][1:])}')
+							self.debug_lineno(f'converted number {line[i][1:]} to {self.conv_num(line[i][1:])}')
 							opcode += self.conv_num(line[i][1:]) & numtype[1]
 						else: self.stop_lineno('Expected immediate (did you forget to add "#"?)')
 					else:
-						logging.debug(f'line {self.idx+1}: converted number {line[i]} to {self.conv_num(line[i])}')
+						self.debug_lineno(f'converted number {line[i]} to {self.conv_num(line[i])}')
 						opcode += self.conv_num(line[i]) & numtype[1]
 
-			logging.debug(f'line {self.idx+1}: converted to word {opcode:04X}')
+			self.debug_lineno(f'converted to word {opcode:04X}')
 
 			byte_data = opcode.to_bytes(2, 'little')
 			byte_data2 = opcode2.to_bytes(2, 'little') if opcode2 is not None else b''
