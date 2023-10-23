@@ -1,3 +1,15 @@
 nX-U8/100 assembler in Python.
 
-Currently, the assembler only supports `XXX Rn, Rm` and `XXX Rn, #imm8` instructions, so it isn't useful yet.
+# Usage
+```
+usage: main.py [-h] [-o output] [-d] input
+
+positional arguments:
+  input                 name of assembly file
+
+options:
+  -h, --help            show this help message and exit
+  -o output, --output output
+                        name of output file. default: out.bin
+  -d, --debug           enable debug logs
+```
