@@ -1,4 +1,4 @@
-nX-U8/100 assembler in Python.
+WIP nX-U8/100 assembler in Python.
 
 # Usage
 ```
