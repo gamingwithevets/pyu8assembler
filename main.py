@@ -2,6 +2,7 @@ import re
 import sys
 import logging
 import argparse
+from functools import cache
 
 class Assembler:
 	def __init__(self):
@@ -200,6 +201,7 @@ class Assembler:
 		self.assembly = None
 
 		self.idx = 0
+		self.adr = 0
 
 		self.numtypes = {
 			# type:          (req_#, numbits, signed, unsigned)
@@ -232,9 +234,17 @@ class Assembler:
 			'CQR': 8,
 		}
 
+	@staticmethod
+	@cache
+	def fmt_addr(addr: int) -> str:
+		csr = (addr & 0xf0000) >> 16
+		high = (addr & 0xff00) >> 8
+		low = addr & 0xff
+		return f'{csr:X}:{high:02X}{low:02X}H'
+
 	def stop_lineno(self, err_str): self.stop(f'line {self.idx+1}: {err_str}')
 
-	def debug_lineno(self, debug_str): logging.debug(f'line {self.idx+1}: {debug_str}')
+	def debug_lineno(self, debug_str): logging.debug(f'line {self.idx+1} ({self.fmt_addr(self.adr)}): {debug_str}')
 
 	@staticmethod
 	def stop(err_str):
@@ -251,16 +261,17 @@ class Assembler:
 				num_str = num_str[1:]
 				negative = True
 			else: self.stop_lineno('Cannot specify negative number for unsigned addressing type')
+		elif num_str == '+': num_str = num_str[1:]
 
 		base = 10
 		if num_str[-1].isnumeric():
 			try: num = int(num_str, base)
-			except ValueError: self.stop_lineno('Invalid number')
+			except ValueError: self.stop_lineno(f'Invalid number: {num_str}')
 		else:
 			if num_str[-1] in self.bases.keys(): base = self.bases[num_str[-1]]
 			else: self.stop_lineno('Invalid radix specifier')
 			try: num = int(num_str[:-1], base)
-			except ValueError: self.stop_lineno('Invalid number')
+			except ValueError: self.stop_lineno(f'Invalid number: {num_str}')
 
 		if negative: num = -num
 		if not (minval <= num <= maxval): self.stop_lineno(f'Number not in range({minval}, {maxval+1})')
@@ -289,9 +300,9 @@ class Assembler:
 		else: self.stop_lineno('Invalid DSR prefix')
 
 	def assemble(self, output):
-		adr = 0
+		self.adr = 0
 		opcodes = {}
-		logging.info('Start assembling.')
+		logging.info('Assembling')
 		for idx in range(len(self.assembly)):
 			if self.assembly[idx] == '' or self.assembly[idx].strip().split(';')[0].strip() == '': continue
 			self.idx = idx
@@ -342,7 +353,7 @@ class Assembler:
 
 			for i in range(1, len(ins)):
 				if ins[i].startswith('G'):
-					for reg, modval in self.regtypes:
+					for reg, modval in self.regtypes.items():
 						match = re.match(reg, ins[i])
 						if match:
 							try: j = line[i][-1]
@@ -356,16 +367,30 @@ class Assembler:
 				elif ins[i].startswith('num_'):
 					numtype = self.numtypes[ins[i]]
 					andval = 2 ** numtype[1] - 1
+					conv_str = line[i]
 					if numtype[0]:
-						if line[i][0] == '#':
-							converted = self.conv_num(line[i][1:], *numtype[1:])
-							self.debug_lineno(f'Converted number {line[i][1:]} to {converted}')
-							opcode += converted & andval
-						else: self.stop_lineno('Expected "#" before number')
-					else:
-						converted = self.conv_num(line[i], *numtype[1:])
-						self.debug_lineno(f'Converted number {line[i]} to {converted}')
-						opcode += converted & andval
+						if line[i][0] == '#': conv_str = line[i][1:]
+						else: self.stop_lineno('Expected "#" before expression')
+
+					ok = False
+					for op in ('+', '-', '*', '/', '%'):
+						if op in conv_str:
+							if ok: self.stop_lineno('One operator at a time only')
+							else: ok = True
+						
+					ok = False
+					for op in ('+', '-', '*', '/', '%'):
+						exp_og = conv_str.split(op)
+						exp = [self.conv_num(e, *numtype[1:]) for e in exp_og]
+						op_ = op if op != '/' else '//'
+						number = eval(f'{exp[0]}{op_}{exp[1]}')
+						ok = True
+						break
+
+					if not ok: number = self.conv_num(conv_str, *numtype[1:])
+
+					self.debug_lineno(f'Converted expression {conv_str} to {number}')
+					opcode += number & andval
 
 			self.debug_lineno(f'Converted to word(s) {format(opcode_dsr, "04X") + " " if opcode_dsr is not None else ""}{opcode:04X}{format(opcode2, "04X") + " " if opcode2 is not None else ""}')
 
@@ -379,12 +404,12 @@ class Assembler:
 				byte_data += opcode2.to_bytes(2, 'little')
 				ins_len += 2
 
-			for i in range(ins_len): opcodes[adr+i] = byte_data[i]
-			adr += ins_len
+			for i in range(ins_len): opcodes[self.adr+i] = byte_data[i]
+			self.adr += ins_len
 
 		logging.info('Writing bytes to bytearray')
 		binary = bytearray(b'\xff'*(sorted(list(opcodes.keys()))[-1] + 1))
-		for adr in opcodes: binary[adr] = opcodes[adr]
+		for self.adr in opcodes: binary[self.adr] = opcodes[self.adr]
 
 		logging.info('Writing bytearray to file')
 		with open(output, 'wb') as f: f.write(binary)
