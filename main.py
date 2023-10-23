@@ -59,10 +59,10 @@ class Assembler:
 		self.idx = 0
 
 		self.numtypes = {
-			# type: (immediate, andval)
-			'num_imm8': (True,  0xff),
-			'num_byte': (False, 0xff),
-			'num_word': (False, 0xffff),
+			# type:     (isimm, maxval, minval, allow_signed)
+			'num_imm8': (True,  0xff,   0,      True),
+			'num_byte': (False, 0xff,   0,      False),
+			'num_word': (False, 0xffff, 0,      False),
 		}
 
 		self.bases = {
@@ -82,7 +82,14 @@ class Assembler:
 		logging.error(err_str)
 		sys.exit()	
 
-	def conv_num(self, num_str):
+	def conv_num(self, num_str, maxval, minval, allow_signed):
+		negative = False
+		if num_str[0] == '-':
+			if allow_signed:
+				num_str = num_str[1:]
+				negative = True
+			else: self.stop_lineno('Cannot specify negative number for unsigned addressing type')
+
 		base = 10
 		if num_str[-1].isnumeric():
 			try: num = int(num_str, base)
@@ -93,6 +100,9 @@ class Assembler:
 			try: num = int(num_str[:-1], base)
 			except ValueError: self.stop_lineno('Invalid number')
 
+		if negative: num = -num
+		if not (minval < num < maxval): self.stop_lineno(f'Number not in range({minval}, {maxval})')
+		
 		return num
 
 	def is_number(self, num_str):
@@ -113,16 +123,17 @@ class Assembler:
 		elif prefix[0] == 'R':
 			if prefix[1:].isnumeric() and int(prefix[1:]) < 16: return 0x900f | int(prefix[1:]) << 4
 			else: self.stop_lineno(f'Invalid Rn value')
-		elif self.is_number(prefix): return 0xe300 + self.conv_num(prefix)
+		elif self.is_number(prefix): return 0xe300 + self.conv_num(prefix, 0xff, 0, False)
 		else: self.stop_lineno('Invalid DSR prefix')
 
 	def assemble(self, output):
 		adr = 0
 		opcodes = {}
+		logging.info('Start assembling.')
 		for idx in range(len(self.assembly)):
-			if self.assembly[idx] == '' or re.fullmatch(r'\s+', self.assembly[idx]): continue
+			if self.assembly[idx] == '' or self.assembly[idx].strip().split(';')[0].strip() == '': continue
 			self.idx = idx
-			line = list(filter(('').__ne__, re.split('[ \t]', self.assembly[idx].upper())))
+			line = list(filter(('').__ne__, re.split('[ \t]', self.assembly[idx].strip().split(';')[0].strip().upper())))
 
 			if line[0] == 'END': break
 
@@ -146,8 +157,8 @@ class Assembler:
 						elif ins[0][i].startswith('P:'):
 							splitted = line[i].split(':')
 							comp_str = splitted[0]
-							if len(line[i]) > 1:
-								if len(line[i]) != 2: self.stop_lineno('Too many colons')
+							if len(splitted) > 1:
+								if len(splitted) != 2: self.stop_lineno('Too many colons')
 								comp_str = splitted[1]
 								opcode_dsr = self.assemble_prefix(splitted[0])
 								self.debug_lineno(f"Converted DSR prefix '{splitted[0]}' to word {opcode_dsr:04X}")
@@ -174,27 +185,38 @@ class Assembler:
 					numtype = self.numtypes[ins[i]]
 					if numtype[0]:
 						if line[i][0] == '#':
-							self.debug_lineno(f'converted number {line[i][1:]} to {self.conv_num(line[i][1:])}')
-							opcode += self.conv_num(line[i][1:]) & numtype[1]
+							converted = self.conv_num(line[i][1:], *numtype[1:])
+							self.debug_lineno(f'converted number {line[i][1:]} to {converted}')
+							opcode += converted & numtype[1]
 						else: self.stop_lineno('Expected immediate (did you forget to add "#"?)')
 					else:
-						self.debug_lineno(f'converted number {line[i]} to {self.conv_num(line[i])}')
-						opcode += self.conv_num(line[i]) & numtype[1]
+						converted = self.conv_num(line[i], *numtype[1:])
+						self.debug_lineno(f'converted number {line[i]} to {converted}')
+						opcode += converted & numtype[1]
 
-			self.debug_lineno(f'converted to word {opcode:04X}')
+			self.debug_lineno(f'converted to word(s) {format(opcode_dsr, "04X") + " " if opcode_dsr is not None else ""}{opcode:04X}{format(opcode2, "04X") + " " if opcode2 is not None else ""}')
 
-			byte_data = opcode.to_bytes(2, 'little')
-			byte_data2 = opcode2.to_bytes(2, 'little') if opcode2 is not None else b''
-			byte_data_dsr = opcode_dsr.to_bytes(2, 'little') if opcode_dsr is not None else b''
-			byte_data = byte_data_dsr + byte_data + byte_data2
+			byte_data = b''
+			
+			if opcode_dsr is not None:
+				byte_data += opcode_dsr.to_bytes(2, 'little')
+				ins_len += 2
+			byte_data += opcode.to_bytes(2, 'little')
+			if opcode2 is not None:
+				byte_data += opcode2.to_bytes(2, 'little')
+				ins_len += 2
 
 			for i in range(ins_len): opcodes[adr+i] = byte_data[i]
 			adr += ins_len
 
+		logging.info('Writing bytes to bytearray')
 		binary = bytearray(b'\xff'*(sorted(list(opcodes.keys()))[-1] + 1))
 		for adr in opcodes: binary[adr] = opcodes[adr]
 
+		logging.info('Writing bytearray to file')
 		with open(output, 'wb') as f: f.write(binary)
+
+		logging.info('Done!')
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser(description = 'nX-U8/100 assembler.', epilog = '(c) 2023 GamingWithEvets Inc.\nLicensed under the GNU GPL-v3 license', formatter_class=argparse.RawTextHelpFormatter, allow_abbrev = False)
