@@ -11,7 +11,7 @@ class Assembler:
 
 
 		# Arithmetic Instructions
-		(('ADD',   'GR0',     'GR1'),           0x8001),
+		(('ADD',   'GR0',     'GR1'),           0x8001,),
 		(('ADD',   'GR0',     'num_imm8'),      0x1000),
 
 		(('ADD',   'GER0',    'GER1'),          0xf006),
@@ -200,8 +200,8 @@ class Assembler:
 
 		self.assembly = None
 
-		self.idx = 0
 		self.adr = 0
+		self.idx = 0
 
 		self.numtypes = {
 			# type:          (req_#, numbits, signed, unsigned)
@@ -301,19 +301,30 @@ class Assembler:
 
 	def assemble(self, output):
 		self.adr = 0
+		inses = {}
 		opcodes = {}
-		logging.info('Assembling')
-		for idx in range(len(self.assembly)):
-			if self.assembly[idx] == '' or self.assembly[idx].strip().split(';')[0].strip() == '': continue
-			self.idx = idx
-			line = list(filter(('').__ne__, re.split('[ \t]', self.assembly[idx].strip().split(';')[0].strip().upper())))
+		adr_idx = {}
+
+		logging.info('Reformatting assembly')
+		assembly = [(re.split('[ \t]', self.assembly[idx].strip().split(';')[0].strip().upper()), idx) for idx in range(len(self.assembly))]
+
+		logging.info('Identifying instructions')
+		for item in assembly:
+			line = item[0]
+			adr_idx[self.adr] = self.idx = item[1]
+
+			if len(line) == 1 and line[0] == '': continue
+
 			if line[0] == 'END': 
 				if len(line) > 1: self.stop_lineno('END directive takes no arguments')
+				self.debug_lineno('Found END directive')
 				break
+
+			logging.debug(f'Identifying instruction: {line}')
 
 			for i in range(1, len(line) - 1): line[i] = line[i][:-1]
 			if len(line) > 3 and line[0] not in ('PUSH', 'POP'): self.stop_lineno("Non-PUSH/POP instruction has more than 3 operands")
-			instruction = None
+			inst = None
 			opcode_dsr = None
 			for ins in self.instruction_list:
 				if len(line) != len(ins[0]): continue
@@ -340,15 +351,22 @@ class Assembler:
 						elif ins[0][i] == line[i]: score += 1
 					if score != len(line) - 1: continue
 
-				instruction = ins
+				inst = inses[self.adr] = (ins, opcode_dsr)
 				self.debug_lineno(f'Instruction matches format of {ins[0]}')
+				self.adr += 2 if opcode_dsr is None else 4
 				break
 
-			if instruction == None: self.stop_lineno('Unknown instruction/directive\n(Instruction/directive may not be implemented yet)')
+			if inst is None: self.stop_lineno('Unknown instruction/directive\n(Instruction/directive may not be implemented yet)')
 
-			ins = instruction[0]
-			opcode = instruction[1]
+		logging.info('Assembling')
+		for adr, instruction in inses.items():
+			self.adr = adr
+			line = assembly[adr_idx[adr]][0]
+			self.idx = assembly[adr_idx[adr]][1]
+			ins = instruction[0][0]
+			opcode = instruction[0][1]
 			opcode2 = None
+			opcode_dsr = instruction[1]
 			ins_len = 2
 
 			for i in range(1, len(ins)):
@@ -377,22 +395,23 @@ class Assembler:
 						if op in conv_str:
 							if ok: self.stop_lineno('One operator at a time only')
 							else: ok = True
-						
-					ok = False
-					for op in ('+', '-', '*', '/', '%'):
-						exp_og = conv_str.split(op)
-						exp = [self.conv_num(e, *numtype[1:]) for e in exp_og]
-						op_ = op if op != '/' else '//'
-						number = eval(f'{exp[0]}{op_}{exp[1]}')
-						ok = True
-						break
+					
+					if ok:
+						ok = False
+						for op in ('+', '-', '*', '/', '%'):
+							exp_og = conv_str.split(op)
+							exp = [self.conv_num(e, *numtype[1:]) for e in exp_og]
+							op_ = op if op != '/' else '//'
+							number = eval(f'{exp[0]}{op_}{exp[1]}')
+							ok = True
+							break
+						if not ok: number = self.conv_num(conv_str, *numtype[1:])
+					else: number = self.conv_num(conv_str, *numtype[1:])
 
-					if not ok: number = self.conv_num(conv_str, *numtype[1:])
 
 					self.debug_lineno(f'Converted expression {conv_str} to {number}')
 					opcode += number & andval
 
-			self.debug_lineno(f'Converted to word(s) {format(opcode_dsr, "04X") + " " if opcode_dsr is not None else ""}{opcode:04X}{format(opcode2, "04X") + " " if opcode2 is not None else ""}')
 
 			byte_data = b''
 			
@@ -403,9 +422,10 @@ class Assembler:
 			if opcode2 is not None:
 				byte_data += opcode2.to_bytes(2, 'little')
 				ins_len += 2
+			
+			self.debug_lineno(f'Converted to word(s) {format(opcode_dsr, "04X") + " " if opcode_dsr is not None else ""}{opcode:04X}{format(opcode2, "04X") + " " if opcode2 is not None else ""}')
 
-			for i in range(ins_len): opcodes[self.adr+i] = byte_data[i]
-			self.adr += ins_len
+			for i in range(ins_len): opcodes[adr+i] = byte_data[i]
 
 		logging.info('Writing bytes to bytearray')
 		binary = bytearray(b'\xff'*(sorted(list(opcodes.keys()))[-1] + 1))
