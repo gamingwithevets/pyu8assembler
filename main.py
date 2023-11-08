@@ -311,9 +311,9 @@ class Assembler:
 		logging.info('Identifying instructions')
 		for item in assembly:
 			line = item[0]
-			adr_idx[self.adr] = self.idx = item[1]
-
 			if len(line) == 1 and line[0] == '': continue
+
+			adr_idx[self.adr] = self.idx = item[1]
 
 			if line[0] == 'END': 
 				if len(line) > 1: self.stop_lineno('END directive takes no arguments')
@@ -324,94 +324,139 @@ class Assembler:
 
 			for i in range(1, len(line) - 1): line[i] = line[i][:-1]
 			if len(line) > 3 and line[0] not in ('PUSH', 'POP'): self.stop_lineno("Non-PUSH/POP instruction has more than 3 operands")
+			if line[0] in ('PUSH', 'POP') and (len(line) > 5 or len(line) < 2): self.stop_lineno('PUSH/POP instruction must be between 1-4 operands')
 			inst = None
+			opcode = None
 			opcode_dsr = None
-			for ins in self.instruction_list:
-				if len(line) != len(ins[0]): continue
-				if line[0] != ins[0][0]: continue
-				score = 0
-				if len(line) > 1:
-					for i in range(1, len(line)):
-						if ins[0][i].startswith('G') and line[i].startswith(ins[0][i][1:]): score += 1
-						elif ins[0][i].startswith('num_'):
-							numtype = self.numtypes[ins[0][i]]
-							if numtype[0]:
-								if line[i][0] == '#': score += 1
-								else: self.stop_lineno('Expected immediate (did you forget to add "#"?)')
-							else: score += 1
-						elif ins[0][i].startswith('P:'):
-							splitted = line[i].split(':')
-							comp_str = splitted[0]
-							if len(splitted) > 1:
-								if len(splitted) != 2: self.stop_lineno('Too many colons')
-								comp_str = splitted[1]
-								opcode_dsr = self.assemble_prefix(splitted[0])
-								self.debug_lineno(f"Converted DSR prefix '{splitted[0]}' to word {opcode_dsr:04X}")
-							if comp_str == ins[0][i][2:]: score += 1
-						elif ins[0][i] == line[i]: score += 1
-					if score != len(line) - 1: continue
+			opcode2 = None
+			skip_assemble = False
 
-				inst = inses[self.adr] = (ins, opcode_dsr)
-				self.debug_lineno(f'Instruction matches format of {ins[0]}')
-				self.adr += 2 if opcode_dsr is None else 4
-				break
+			if line[0] == 'PUSH' and all([i not in line[1:] for i in ('R', 'ER', 'XR', 'QR')]):
+				self.debug_lineno('Detected instruction as PUSH lepa')
+				regs_found = []
+				base_word = 0xf0ce
+				num = 0
 
-			if inst is None: self.stop_lineno('Unknown instruction/directive\n(Instruction/directive may not be implemented yet)')
+				for reg in line[1:]:
+					if reg in regs_found: self.stop_lineno(f'Duplicate register {reg}')
+					else: regs_found.append(reg)
+					if reg == 'EA': num += 1
+					elif reg == 'ELR': num += 2
+					elif reg == 'EPSW': num += 4
+					elif reg == 'LR': num += 8
+					else: self.stop_lineno(f'Unknown register {reg}')
+
+				opcode = base_word | (num << 8)
+				inses[self.adr] = ((line, opcode), None)
+				skip_assemble = True
+
+			elif line[0] == 'POP' and all([i not in line[1:] for i in ('R', 'ER', 'XR', 'QR')]):
+				self.debug_lineno('Detected instruction as POP lepa')
+				regs_found = []
+				base_word = 0xf08e
+				num = 0
+
+				for reg in line[1:]:
+					if reg in regs_found: self.stop_lineno(f'Duplicate register {reg}')
+					else: regs_found.append(reg)
+					if reg == 'EA': num += 1
+					elif reg == 'PC': num += 2
+					elif reg == 'PSW': num += 4
+					elif reg == 'LR': num += 8
+					else: self.stop_lineno(f'Unknown register {reg}')
+
+				opcode = base_word | (num << 8)
+				inses[self.adr] = ((line, opcode), None)
+				skip_assemble = True
+
+			else:
+				for ins in self.instruction_list:
+					if len(line) != len(ins[0]): continue
+					if line[0] != ins[0][0]: continue
+					score = 0
+					if len(line) > 1:
+						for i in range(1, len(line)):
+							if ins[0][i].startswith('G') and line[i].startswith(ins[0][i][1:]): score += 1
+							elif ins[0][i].startswith('num_'):
+								numtype = self.numtypes[ins[0][i]]
+								if numtype[0]:
+									if line[i][0] == '#': score += 1
+									else: self.stop_lineno('Expected immediate (did you forget to add "#"?)')
+								else: score += 1
+							elif ins[0][i].startswith('P:'):
+								splitted = line[i].split(':')
+								comp_str = splitted[0]
+								if len(splitted) > 1:
+									if len(splitted) != 2: self.stop_lineno('Too many colons')
+									comp_str = splitted[1]
+									opcode_dsr = self.assemble_prefix(splitted[0])
+									self.debug_lineno(f"Converted DSR prefix '{splitted[0]}' to word {opcode_dsr:04X}")
+								if comp_str == ins[0][i][2:]: score += 1
+							elif ins[0][i] == line[i]: score += 1
+						if score != len(line) - 1: continue
+
+					inst = inses[self.adr] = (ins, opcode_dsr)
+					self.debug_lineno(f'Instruction matches format of {ins[0]}')
+					self.adr += 2 if opcode_dsr is None else 4
+					break
+
+				if inst is None: self.stop_lineno('Unknown instruction/directive\n(Instruction/directive may not be implemented yet)')
 
 		logging.info('Assembling')
+
 		for adr, instruction in inses.items():
 			self.adr = adr
-			line = assembly[adr_idx[adr]][0]
 			self.idx = assembly[adr_idx[adr]][1]
-			ins = instruction[0][0]
-			opcode = instruction[0][1]
-			opcode2 = None
-			opcode_dsr = instruction[1]
 			ins_len = 2
+			
+			if skip_assemble:
+				line = assembly[adr_idx[adr]][0]
+				ins = instruction[0][0]
+				opcode = instruction[0][1]
+				opcode_dsr = instruction[1]
 
-			for i in range(1, len(ins)):
-				if ins[i].startswith('G'):
-					for reg, modval in self.regtypes.items():
-						match = re.match(reg, ins[i])
-						if match:
-							try: j = line[i][-1]
-							except ValueError: self.stop_lineno('Error getting register nibble placement')
-							num = line[i][match.end():-1]
-							if num.isnumeric() and int(num) < 16 and int(num) % modval == 0:
-								val = int(num)
-								if reg == 'ER' and ins[0] == 'EXTBW': opcode |= (val + 1) << 8 + val << 4
-								else: opcode |= int(num) << (4 if j == 1 else 8)
-							else: self.stop_lineno(f'Invalid {reg}n value')
-				elif ins[i].startswith('num_'):
-					numtype = self.numtypes[ins[i]]
-					andval = 2 ** numtype[1] - 1
-					conv_str = line[i]
-					if numtype[0]:
-						if line[i][0] == '#': conv_str = line[i][1:]
-						else: self.stop_lineno('Expected "#" before expression')
+				for i in range(1, len(ins)):
+					if ins[i].startswith('G'):
+						for reg, modval in self.regtypes.items():
+							match = re.match(reg, ins[i])
+							if match:
+								try: j = line[i][-1]
+								except ValueError: self.stop_lineno('Error getting register nibble placement')
+								num = line[i][match.end():-1]
+								if num.isnumeric() and int(num) < 16 and int(num) % modval == 0:
+									val = int(num)
+									if reg == 'ER' and ins[0] == 'EXTBW': opcode |= (val + 1) << 8 + val << 4
+									else: opcode |= int(num) << (4 if j == 1 else 8)
+								else: self.stop_lineno(f'Invalid {reg}n value')
+					elif ins[i].startswith('num_'):
+						numtype = self.numtypes[ins[i]]
+						andval = 2 ** numtype[1] - 1
+						conv_str = line[i]
+						if numtype[0]:
+							if line[i][0] == '#': conv_str = line[i][1:]
+							else: self.stop_lineno('Expected "#" before expression')
 
-					ok = False
-					for op in ('+', '-', '*', '/', '%'):
-						if op in conv_str:
-							if ok: self.stop_lineno('One operator at a time only')
-							else: ok = True
-					
-					if ok:
 						ok = False
 						for op in ('+', '-', '*', '/', '%'):
-							exp_og = conv_str.split(op)
-							exp = [self.conv_num(e, *numtype[1:]) for e in exp_og]
-							op_ = op if op != '/' else '//'
-							number = eval(f'{exp[0]}{op_}{exp[1]}')
-							ok = True
-							break
-						if not ok: number = self.conv_num(conv_str, *numtype[1:])
-					else: number = self.conv_num(conv_str, *numtype[1:])
+							if op in conv_str:
+								if ok: self.stop_lineno('One operator at a time only')
+								else: ok = True
+						
+						if ok:
+							ok = False
+							for op in ('+', '-', '*', '/', '%'):
+								exp_og = conv_str.split(op)
+								exp = [self.conv_num(e, *numtype[1:]) for e in exp_og]
+								op_ = op if op != '/' else '//'
+								number = eval(f'{exp[0]}{op_}{exp[1]}')
+								ok = True
+								break
+							if not ok: number = self.conv_num(conv_str, *numtype[1:])
+						else: number = self.conv_num(conv_str, *numtype[1:])
 
 
-					self.debug_lineno(f'Converted expression {conv_str} to {number}')
-					opcode += number & andval
-
+						self.debug_lineno(f'Converted expression {conv_str} to {number}')
+						opcode += number & andval
 
 			byte_data = b''
 			
